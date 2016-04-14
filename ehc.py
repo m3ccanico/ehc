@@ -4,7 +4,9 @@ import sys
 end_states = (nids.NIDS_CLOSE, nids.NIDS_TIMEOUT, nids.NIDS_RESET)
 
 def http_callback(tcp):
-    print "http"
+    #print "http"
+    #print tcp.client.data[:tcp.client.count]
+    print tcp.client.data[:20]
 
 def tcp_callback(tcp):
     #print "tcps -", str(tcp.addr), " state:", tcp.nids_state
