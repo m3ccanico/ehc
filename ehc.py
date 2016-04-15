@@ -92,9 +92,9 @@ def http_response(tcp, data, i):
     if ext != "":
         name = "%s_%s-%s_%s.%s" % (src_ip, src_port, dst_ip, dst_port, ext)
         sys.stdout.write(" exported %s as %s\n" % (content_type, name))
-        #o = open(name, 'wb')
-        #o.write(body)
-        #o.close
+        o = open(name, 'wb')
+        o.write(body)
+        o.close
     else:
         sys.stdout.write(" ignored %s\n" % content_type)
     sys.stdout.flush()
