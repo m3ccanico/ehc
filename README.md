@@ -1,6 +1,6 @@
 # Introduction
 
-Extract HTTP Content (EHC) extracts content from HTTP streams in PCAP files.
+Extract HTTP Content (EHC) extracts content from HTTP streams in PCAP files. It supports compressed and chunked content. It only extracts HTML, JS, and SWF content from streams on TCP ports 80, 8000, and 8080. Both is very easy to extend if required.
 
 # Installation
 
