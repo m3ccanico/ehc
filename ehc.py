@@ -3,9 +3,15 @@ import sys
 import re
 import zlib
 import StringIO
+import getopt
+import os
+import hexdump
 
 
 end_states = (nids.NIDS_CLOSE, nids.NIDS_TIMEOUT, nids.NIDS_RESET)
+output_dir = ''
+filename = ''
+debugging = False
 
 
 def reassemble_chunked_body(chunked_body):
@@ -13,26 +19,27 @@ def reassemble_chunked_body(chunked_body):
     stream = StringIO.StringIO(chunked_body)
     while True:
         line = stream.readline().strip()
-        if not line: break;                     # stream retruns empty string in case of EOF
+        #print "\nline: %s" % line
+        if not line: break;                     # stream returs empty string in case of EOF
         length = int(line, 16)
+        #print "length: %i" % length
         chunk = stream.read(length)
+        #print "should read %i, read %i" % (length, len(chunk))
+        #print format(ord(chunk[0]), '02x')
+        #print format(ord(chunk[1]), '02x')
         body += chunk
     return body
 
 
 def http_response(tcp, data, i):
     #print data[:20]
-    sys.stdout.write(" %i:" % i)
+    sys.stdout.write(" %02i:" % i)
     ((src_ip, src_port), (dst_ip, dst_port)) = tcp.addr
     try:
         (headers, body) = re.split(b"\r\n\r\n", data, 1)
     except ValueError:
-        #((src_ip, src_port), (dst_ip, dst_port)) = tcp.addr
-        print "ERROR: Cannot split (ip.addr==%s and tcp.port==%s and ip.addr==%s and tcp.port==%s)" % (src_ip, src_port, dst_ip, dst_port)
-        print str(data[:500])
-        #print tcp.client.data
-        print ValueError
-        print "<<<"
+        print " ERROR: Cannot split (ip.addr==%s and tcp.port==%s and ip.addr==%s and tcp.port==%s)" % (src_ip, src_port, dst_ip, dst_port)
+        if debugging: hexdump.hexdump(str)
         return
     
     # read all headers, store relevant info
@@ -69,15 +76,13 @@ def http_response(tcp, data, i):
             body = zlib.decompress(body, zlib.MAX_WBITS|32)
             #print "decompressed (ip.addr==%s and tcp.port==%s and ip.addr==%s and tcp.port==%s)" % (src_ip, src_port, dst_ip, dst_port)
         except:
-            print "ERROR: Cannot decompress (ip.addr==%s and tcp.port==%s and ip.addr==%s and tcp.port==%s)" % (src_ip, src_port, dst_ip, dst_port)
-            print headers
-            print "<<< %i" % len(body)
+            print " ERROR: Cannot decompress (ip.addr==%s and tcp.port==%s and ip.addr==%s and tcp.port==%s)" % (src_ip, src_port, dst_ip, dst_port)
+            if debugging: hexdump.hexdump(body)
             return
     
     #if content_type == "":
-    #    print "ERROR: No content type (ip.addr==%s and tcp.port==%s and ip.addr==%s and tcp.port==%s)" % (src_ip, src_port, dst_ip, dst_port)
+    #    print " ERROR: No content type (ip.addr==%s and tcp.port==%s and ip.addr==%s and tcp.port==%s)" % (src_ip, src_port, dst_ip, dst_port)
     #    print headers
-    #    print "<<<"
     
     # chose file extension based on content type
     ext = ""
@@ -91,8 +96,9 @@ def http_response(tcp, data, i):
     # ignore unknonw content
     if ext != "":
         name = "%s_%s-%s_%s.%s" % (src_ip, src_port, dst_ip, dst_port, ext)
+        full_name = os.path.join(output_dir, name)
         sys.stdout.write(" exported %s as %s\n" % (content_type, name))
-        o = open(name, 'wb')
+        o = open(full_name, 'wb')
         o.write(body)
         o.close
     else:
@@ -129,9 +135,31 @@ def tcp_callback(tcp):
         http_stream(tcp)
 
 
-def main():
+def main(argv):
+    global output_dir, filename, debugging
+
+    try:
+        opts, args = getopt.getopt(argv,"hdo:",["odir="])
+    except getopt.GetoptError:
+        print 'ehc.py -o <output directory>'
+        sys.exit(2)
+
+    for opt, arg in opts:
+        if opt == '-h':
+            print 'ehc.py -o <output directory>'
+            sys.exit()
+        if opt == '-d':
+            debugging = True
+        elif opt in ("-o", "--odir"):
+            output_dir = arg
+
+    filename = argv[-1]
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
     nids.param("san_num_hosts", 0)          # disable portscan detections
-    nids.param("filename", sys.argv[1])     # read from PCAP
+    nids.param("filename", filename)     # read from PCAP
     nids.chksum_ctl([('0.0.0.0/0', False)]) # disable checksumming
     nids.init()
     nids.register_tcp(tcp_callback)
@@ -139,4 +167,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
