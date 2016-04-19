@@ -19,12 +19,22 @@ def reassemble_chunked_body(chunked_body):
     stream = StringIO.StringIO(chunked_body)
     while True:
         line = stream.readline().strip()
-        #print "\nline: %s" % line
-        if not line: break;                     # stream returs empty string in case of EOF
+        #print "\nline: %s<" % line
+        #hexdump.hexdump(line)
+        if not line: break                                          # stream returs an empty string in case of EOF
         length = int(line, 16)
         #print "length: %i" % length
-        chunk = stream.read(length)
-        #print "should read %i, read %i" % (length, len(chunk))
+        left = length+2                                             # read also the ending \r\n the drop them at the end to aling the next line
+        chunk = ''
+        while True:
+            bit = stream.readline(left)
+            left -= len(bit)
+            chunk += bit
+            if len(chunk) >= length or bit == "": break
+            #print "   read %i, %i left" % (len(bit), left)
+
+        chunk = chunk[0:-2]                                         # ignore last \r\n other \r\n are part of the stream
+        #print "  chunk should read %i, read %i" % (length, len(chunk))
         #print format(ord(chunk[0]), '02x')
         #print format(ord(chunk[1]), '02x')
         body += chunk
@@ -95,7 +105,7 @@ def http_response(tcp, data, i):
     
     # ignore unknonw content
     if ext != "":
-        name = "%s_%s-%s_%s.%s" % (src_ip, src_port, dst_ip, dst_port, ext)
+        name = "%s_%s-%s_%s-%02i.%s" % (src_ip, src_port, dst_ip, dst_port, i, ext)
         full_name = os.path.join(output_dir, name)
         sys.stdout.write(" exported %s as %s\n" % (content_type, name))
         o = open(full_name, 'wb')
