@@ -19,9 +19,18 @@ python setup.py build
 sudo python setup.py install
 ```
 
-# Execution
+# Usage
 
 ```bash
 python ehc.py <file.pcap>
 ```
 
+Select an output folder instead of the current working directory.
+```bash
+python ehc.py -o out <file.pcap>
+```
+
+Enable debugging when there are parsing issues (dumps the content as hexdump).
+```bash
+python ehc.py -d <file.pcap>
+```
