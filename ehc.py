@@ -7,6 +7,13 @@ import getopt
 import os
 import hexdump
 
+#try:
+#    from http_parser.parser import HttpParser
+#except ImportError:
+#    from http_parser.pyparser import HttpParser
+
+import dpkt
+
 
 end_states = (nids.NIDS_CLOSE, nids.NIDS_TIMEOUT, nids.NIDS_RESET)
 output_dir = ''
@@ -119,7 +126,9 @@ def http_response(tcp, data, i):
 def http_stream(tcp):
     ((src_ip, src_port), (dst_ip, dst_port)) = tcp.addr
     print "stream %s:%s - %s:%s" % (src_ip, src_port, dst_ip, dst_port)
-    res = re.finditer(b"HTTP/1.1 2", tcp.client.data)
+
+    # HTTP requests
+    res = re.finditer(b"(GET|POST) ", tcp.server.data[:tcp.server.count])
     lst = list(res)
 
     for i in range(len(lst)):
@@ -127,8 +136,89 @@ def http_stream(tcp):
         if i+1 < len(lst):
             end = lst[i+1].start()
         else:
-            end = len(tcp.client.data)
-        http_response(tcp, tcp.client.data[start:end], i)
+            end = tcp.server.count
+        req = dpkt.http.Request(tcp.server.data[start:end])
+        print " request: 0x%08x - 0x%08x: " % (start, end), req.method, req.headers['host'], req.uri
+
+    # HTTP responses
+    print "responses 0x%08x - 0x%08x (0x%i)" % (0, tcp.client.count, tcp.client.count)
+    res = re.finditer(b"HTTP/1.[01] \d", tcp.client.data[:tcp.client.count]) # convert to byte object
+    lst = list(res)
+
+    for i in range(len(lst)):
+        start = lst[i].start()
+        if i+1 < len(lst):
+            end = lst[i+1].start()
+        else:
+            end = tcp.client.count
+        #http_response(tcp, tcp.client.data[start:end], i)
+        print " parsing 0x%08x - 0x%08x (%i): " % (start, end, end-start)
+        try:
+            rsp = None
+            rsp = dpkt.http.Response(tcp.client.data[start:])
+        except:
+            print sys.exc_info()[0]
+            #hexdump.hexdump(tcp.client.data[start:end])
+            hexdump.hexdump(tcp.client.data)
+            #exit()
+        print " response 0x%08x - 0x%08x: " % (start, end), rsp.status, rsp.headers.get('content-type', ''), rsp.headers.get('content-length', '')
+
+    
+
+#def http_stream(tcp):
+#
+#    requests = []
+#    responses = []
+#
+#    read = 0
+#    #print "server data:", tcp.server.count
+#    while read < tcp.server.count:
+#        req = dpkt.http.Request(tcp.server.data[read:])
+#        requests.append(req)
+#        print " request: ", req.method, req.uri, len(req)
+#        read += len(req)
+#
+#    read = 0
+#    #print "client data:", tcp.client.count
+#    while read < tcp.client.count:
+#        try:
+#            rsp = dpkt.http.Response(tcp.client.data[read:])
+#            responses.append(rsp)
+#        except:
+#            ((src_ip, src_port), (dst_ip, dst_port)) = tcp.addr
+#            print " ERROR: Cannot parse response in (ip.addr==%s and tcp.port==%s and ip.addr==%s and tcp.port==%s)" % (src_ip, src_port, dst_ip, dst_port)
+#            break
+#        print " response: ", rsp.status, len(rsp)
+#        #print rsp.headers
+#        try:
+#            length = int(rsp.headers['content-length']) #+ len(rsp.pack_hdr())
+#        except KeyError:
+#            length = len(rsp)
+#        print " content length: ", length
+#        read += len(rsp)
+#        #read += length
+#
+#    print "read %i requests, %i responses" % (len(requests), len(responses))
+#    #exit()
+
+#def http_stream(tcp):
+#    print "---"
+#
+#    p = HttpParser()
+#    p.execute(tcp.server.data, len(tcp.server.data))
+#    #print p.get_headers()
+#    print p.get_method()
+#    print p.get_url()
+#    print p.get_status_code()
+#
+#    print "-"
+#
+#    p = HttpParser()
+#    p.execute(tcp.client.data, len(tcp.client.data))
+#    #print p.get_headers()
+#    print p.get_method()
+#    print p.get_url()
+#    print p.get_status_code()
 
 
 def tcp_callback(tcp):
@@ -169,7 +259,7 @@ def main(argv):
         os.makedirs(output_dir)
 
     nids.param("san_num_hosts", 0)          # disable portscan detections
-    nids.param("filename", filename)     # read from PCAP
+    nids.param("filename", filename)        # read from PCAP
     nids.chksum_ctl([('0.0.0.0/0', False)]) # disable checksumming
     nids.init()
     nids.register_tcp(tcp_callback)
