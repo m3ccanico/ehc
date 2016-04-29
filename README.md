@@ -8,7 +8,7 @@ EHC only needs python and the pynids library.
 
 ## Ubuntu
 
-Xgusix describes in his [blog](http://xgusix.com/blog/installing-pynids-in-ubuntu-12-10-x64/) how to install pynids on Ubuntu.
+The package included in Ubuntu is broken but, Xgusix describes in his [blog](http://xgusix.com/blog/installing-pynids-in-ubuntu-12-10-x64/) how to install pynids on Ubuntu properly.
 
 ## Mac OSX
 
