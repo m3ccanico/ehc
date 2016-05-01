@@ -1,4 +1,5 @@
-import nids
+#import nids
+import dpkt
 import sys
 import re
 import zlib
@@ -7,19 +8,7 @@ import getopt
 import os
 import hexdump
 
-#try:
-#    from http_parser.parser import HttpParser
-#except ImportError:
-#    from http_parser.pyparser import HttpParser
-
-import dpkt
-
-
-end_states = (nids.NIDS_CLOSE, nids.NIDS_TIMEOUT, nids.NIDS_RESET)
-output_dir = ''
-filename = ''
-debugging = False
-
+import TcpStream
 
 def reassemble_chunked_body(chunked_body):
     body = ""
@@ -123,26 +112,26 @@ def http_response(tcp, data, i):
     sys.stdout.flush()
 
 
-def http_stream(tcp):
-    ((src_ip, src_port), (dst_ip, dst_port)) = tcp.addr
-    print "stream %s:%s - %s:%s" % (src_ip, src_port, dst_ip, dst_port)
-
+def http_stream(request, response):
+    #((src_ip, src_port), (dst_ip, dst_port)) = tcp.addr
+    #print "stream %s:%s - %s:%s" % (src_ip, src_port, dst_ip, dst_port)
+    
     # HTTP requests
-    res = re.finditer(b"(GET|POST) ", tcp.server.data[:tcp.server.count])
+    res = re.finditer(b"(GET|POST) ", request.data)
     lst = list(res)
-
+    
     for i in range(len(lst)):
         start = lst[i].start()
         if i+1 < len(lst):
             end = lst[i+1].start()
         else:
-            end = tcp.server.count
-        req = dpkt.http.Request(tcp.server.data[start:end])
-        print " request: 0x%08x - 0x%08x: " % (start, end), req.method, req.headers['host'], req.uri
+            end = len(request.data)
+        req = dpkt.http.Request(request.data[start:end])
+        print " request:  0x%08x - 0x%08x: " % (start, end), req.method, req.headers.get('host', ''), req.uri
 
     # HTTP responses
-    print "responses 0x%08x - 0x%08x (0x%i)" % (0, tcp.client.count, tcp.client.count)
-    res = re.finditer(b"HTTP/1.[01] \d", tcp.client.data[:tcp.client.count]) # convert to byte object
+    #print "responses 0x%08x - 0x%08x (0x%i)" % (0, tcp.client.count, tcp.client.count)
+    res = re.finditer(b"HTTP/1.[01] \d", response.data) # convert to byte object
     lst = list(res)
 
     for i in range(len(lst)):
@@ -150,18 +139,18 @@ def http_stream(tcp):
         if i+1 < len(lst):
             end = lst[i+1].start()
         else:
-            end = tcp.client.count
+            end = len(response.data)
         #http_response(tcp, tcp.client.data[start:end], i)
-        print " parsing 0x%08x - 0x%08x (%i): " % (start, end, end-start)
+        #print " parsing 0x%08x - 0x%08x (%i): " % (start, end, end-start)
         try:
             rsp = None
-            rsp = dpkt.http.Response(tcp.client.data[start:])
+            rsp = dpkt.http.Response(response.data[start:])
         except:
             print sys.exc_info()[0]
             #hexdump.hexdump(tcp.client.data[start:end])
             hexdump.hexdump(tcp.client.data)
             #exit()
-        print " response 0x%08x - 0x%08x: " % (start, end), rsp.status, rsp.headers.get('content-type', ''), rsp.headers.get('content-length', '')
+        print " response: 0x%08x - 0x%08x: " % (start, end), rsp.status, rsp.headers.get('content-type', ''), rsp.headers.get('content-length', '')
 
     
 
@@ -236,35 +225,61 @@ def tcp_callback(tcp):
 
 
 def main(argv):
-    global output_dir, filename, debugging
-
+    
+    output_dir = os.path.dirname(os.path.realpath(__file__))
+    debug = False
+    filename = ""
+        
+    #global output_dir, filename, debugging
+    #
     try:
         opts, args = getopt.getopt(argv,"hdo:",["odir="])
     except getopt.GetoptError:
-        print 'ehc.py -o <output directory>'
+        print 'ehc.py -o <output directory> <filename>'
         sys.exit(2)
-
+    
     for opt, arg in opts:
         if opt == '-h':
             print 'ehc.py -o <output directory>'
             sys.exit()
         if opt == '-d':
-            debugging = True
+            debug = True
         elif opt in ("-o", "--odir"):
             output_dir = arg
-
+    
     filename = argv[-1]
-
+    
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-
-    nids.param("san_num_hosts", 0)          # disable portscan detections
-    nids.param("filename", filename)        # read from PCAP
-    nids.chksum_ctl([('0.0.0.0/0', False)]) # disable checksumming
-    nids.init()
-    nids.register_tcp(tcp_callback)
-    nids.run()
-
+        
+    # parse all TCP streams
+    parser = TcpStream.TcpStreamParser(debug=debug)
+    streams = parser.parse_pcap_file(filename)
+    
+    # find HTTP streams
+    http_responses = []
+    for tupl, stream in streams.iteritems():
+        #print stream.data[:6]
+        if stream.data[:6] == "HTTP/1":
+            http_responses.append(tupl)
+            #print tupl
+            
+    # find requests and create http_pairs
+    http_pairs = []
+    for response in http_responses:
+        # tupl = (ip.src, ip.dst, tcp.sport, tcp.dport)
+        request = (response[1], response[0], response[3], response[2])
+        if request in streams:
+            #print "have request and reply"
+            http_pairs.append((request, response))
+        else:
+            print "missing reply", request
+    
+    # parse http_pairs
+    print "found %i HTTP http_pairs" % len(http_pairs)
+    for pair in http_pairs:
+        print pair[0]
+        http_stream(streams[pair[0]], streams[pair[1]])
 
 if __name__ == "__main__":
     main(sys.argv[1:])
