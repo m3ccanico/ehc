@@ -1,4 +1,7 @@
 import dpkt
+import logging
+import socket
+
     
 class TcpStreamException(Exception):
     def __init__(self, value):
@@ -10,41 +13,47 @@ class TcpStream:
     
     _cnt = 0
     
-    def __init__(self, tcp, ip, debug=False):
-        #self.src_ip = ip.src
-        #self.dst_ip = ip.dst
-        #self.src_prt = tcp.sport
-        #self.dst_prt = tcp.dport
-        self.debug = debug
+    def __init__(self, tcp, ip):
         self.closed = False
         self.data = ""
-        
-        if tcp.flags & dpkt.tcp.TH_SYN:
-            self.seq = tcp.seq
-        else:
-            raise TcpStreamException("out of sync SYN")
-        
+        self.gaps = []
+
+        self.seq = tcp.seq
+        self.start_seq = tcp.seq
+
         # id each stream
         self.id = self._cnt
         TcpStream._cnt += 1
-        self._debug("created (%i): seq:0 (%i)" % (self.id, self.seq))
+        logging.debug("created (%i): seq:0 (%i)" % (self.id, self.seq))
         
-        
-    def _debug(self, message):
-        if self.debug:
-            print message
+        if not tcp.flags & dpkt.tcp.TH_SYN:
+            logging.warning("received (%i): non SYN first segment - src:%s dst:%s sprt:%i dort:%i" % \
+                (self.id, socket.inet_ntoa(ip.src), socket.inet_ntoa(ip.dst), tcp.sport, tcp.dport))
+    
+
         
     def receive(self, tcp):
         rel = tcp.seq - self.seq
-        self._debug("received (%i): bytes: %i, expected seq:%i, actual seq:%i" \
-            % (self.id, len(tcp.data), self.seq, tcp.seq))
+        logging.debug("received (%i): bytes: %i, expected seq:%i (%i), actual seq:%i (%i)" \
+            % (self.id, len(tcp.data), self.seq, self._rel(self.seq), tcp.seq, self._rel(tcp.seq)))
         
         if self.seq == tcp.seq:
             self.data += tcp.data
+            logging.debug("received: (%i): in sequence" % self.id)
         elif self.seq > tcp.seq:
-            self._debug("received (%i): retransmission (expected:%i received:%i)" % (self.id, self.seq, tcp.seq))
+            logging.warning("received (%i): ealier segment - expected:%i (%i) received:%i (%i) size:%i, ignored" % \
+                (self.id, self.seq, self._rel(self.seq), tcp.seq, self._rel(tcp.seq), len(tcp.data)))
+            return
         else:
-            raise TcpStreamException("out of sequence segment received (expected:%i received:%i)" % (self.seq, tcp.seq))
+            # earlier segment missing, adding filler
+            delta = tcp.seq-self.seq
+            logging.warning("received (%i): previous segment missing - expected:%i (%i) received:%i (%i) delta:%i, adding filler" % \
+                (self.id, self.seq, self._rel(self.seq), tcp.seq, self._rel(tcp.seq), delta))
+            self.gaps.append(())
+            filler = b'\0' * (tcp.seq-self.seq)
+            #filler = array('b', )
+            self.data += filler
+            self.seq += len(filler)
         
         # follow other sides seq number
         # move seq 1 if SYN or FIN is set
@@ -54,13 +63,15 @@ class TcpStream:
         self.seq += len(tcp.data)
         
         if tcp.flags & dpkt.tcp.TH_FIN:
-            self._debug("closed (%i)" % self.id)
+            logging.debug("closed (%i)" % self.id)
             self.closed = True
+
+    def _rel(self, seq):
+        return seq - self.start_seq
 
 class TcpStreamParser:
     
-    def __init__(self, debug=False):
-        self.debug = debug
+    #def __init__(self):
     
     def parse_pcap_file(self, filename):
         # Open the pcap file
@@ -84,7 +95,7 @@ class TcpStreamParser:
             tupl = (ip.src, ip.dst, tcp.sport, tcp.dport)
         
             if tupl not in streams:
-                streams[tupl] = TcpStream(tcp, ip, debug=self.debug)
+                streams[tupl] = TcpStream(tcp, ip)
             streams[tupl].receive(tcp)
         
         return streams
@@ -96,5 +107,8 @@ if __name__ == '__main__':
         print "%s <pcap filename>" % sys.argv[0]
         sys.exit(2)
     
-    parser = TcpStreamParser(debug=False)
+    #logging.basicConfig(level=logging.DEBUG,format="%(levelname)s: %(message)s")
+    logging.basicConfig(level=logging.INFO,format="%(levelname)s: %(message)s")
+
+    parser = TcpStreamParser()
     streams = parser.parse_pcap_file(sys.argv[1])
